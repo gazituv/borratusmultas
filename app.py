@@ -11,7 +11,7 @@ import zipfile
 # --- CONFIGURACIÓN DE NEGOCIO ---
 PRECIO_SERVICIO = 14990
 # ⚠️ IMPORTANTE: Pega aquí tu link real de Mercado Pago
-LINK_MERCADO_PAGO = "https://link.mercadopago.cl/TU_LINK_AQUI" 
+LINK_MERCADO_PAGO = "https://mpago.la/24oHCqt" 
 CLAVE_ACCESO = "AUTO2026"
 
 # --- CONFIGURACIÓN VISUAL ---

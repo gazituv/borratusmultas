@@ -8,7 +8,7 @@ import zipfile
 
 # --- CONFIGURACIÓN DE NEGOCIO ---
 PRECIO_SERVICIO = 14990
-# ⚠️ CAMBIA ESTO: Pega aquí tu link real de Mercado Pago cuando lo tengas
+# ⚠️ IMPORTANTE: PEGA AQUÍ TU LINK REAL DE MERCADO PAGO
 LINK_MERCADO_PAGO = "https://link.mercadopago.cl/TU_LINK_AQUI" 
 CLAVE_ACCESO = "AUTO2026"
 
@@ -39,16 +39,12 @@ st.markdown("""
         font-weight: bold; font-size: 0.8rem; text-transform: uppercase; margin-bottom: 10px; display: inline-block;
     }
     
-    /* Botón Externo (Registro Civil) */
     .btn-registrocivil {
         display: block; width: 100%; padding: 15px; margin-top: 15px;
-        background-color: #00519E; color: white; /* Azul Gobierno */
-        text-decoration: none; border-radius: 8px; text-align: center; font-weight: bold; 
-        border: 1px solid #003f7a; transition: 0.3s;
+        background-color: #00519E; color: white; text-decoration: none; border-radius: 8px; text-align: center; font-weight: bold; border: 1px solid #003f7a; transition: 0.3s;
     }
     .btn-registrocivil:hover {background-color: #003f7a;}
 
-    /* Botón de Pago (Mercado Pago) */
     .pay-btn {
         display: block; width: 100%; background: #FACC15; color: black;
         font-weight: 900; text-align: center; padding: 20px; border-radius: 12px;
@@ -57,7 +53,6 @@ st.markdown("""
     }
     .pay-btn:hover {transform: scale(1.02); background: #fde047;}
 
-    /* Resultados */
     .success-box {
         background: white; border: 2px solid #22c55e; border-radius: 16px;
         padding: 30px; text-align: center; margin-top: 20px;
@@ -71,9 +66,24 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- BACKEND (CEREBRO) ---
+
 def limpiar_texto(texto):
     if not texto: return ""
     return texto.replace('"', '').replace(',', '').strip().upper()
+
+def buscar_patente_chilena(texto):
+    """
+    Plan B: Busca el formato de patente si falla la lectura del título.
+    """
+    # Formato Nuevo (BB-BB-11)
+    patron_nueva = re.search(r'\b([B-D,F-H,J-L,P,R-T,V-Z]{4})[\.-]?(\d{2})\b', texto)
+    if patron_nueva: return f"{patron_nueva.group(1)}-{patron_nueva.group(2)}"
+    
+    # Formato Antiguo (AA-1111)
+    patron_antigua = re.search(r'\b([A-Z]{2})[\.-]?(\d{4})\b', texto)
+    if patron_antigua: return f"{patron_antigua.group(1)}-{patron_antigua.group(2)}"
+        
+    return "NO DETECTADA"
 
 def es_prescribible(fecha_str):
     try:
@@ -97,15 +107,25 @@ def procesar_pdf(archivo):
         if "REGISTRO DE MULTAS" not in texto_completo and "TRANSITO NO PAGADAS" not in texto_completo:
             return None, None
 
-        # Extracción de Datos
-        match_patente = re.search(r'PATENTE UNICA\s+([A-Z0-9\.\-]+)', texto_completo)
-        if match_patente: datos['patente'] = limpiar_texto(match_patente.group(1))
+        # --- DETECCIÓN DE DATOS DEL DUEÑO ---
+        
+        # 1. Patente (Corrección: Busca "PLACA PATENTE UNICA")
+        match_patente = re.search(r'PLACA\s+PATENTE\s+UNICA\s*[:\.]?\s*([A-Z0-9\-\.]{6,8})', texto_completo)
+        if match_patente: 
+            datos['patente'] = limpiar_texto(match_patente.group(1))
+        else:
+            # Si falla, usa el buscador por formato
+            datos['patente'] = buscar_patente_chilena(texto_completo)
+
+        # 2. RUT
         match_rut = re.search(r'R\.U\.N\.\s*:\s*([\d\.\-Kk]+)', texto_completo)
         if match_rut: datos['rut'] = limpiar_texto(match_rut.group(1))
+        
+        # 3. Nombre
         match_nombre = re.search(r'Nombre\s*:\s*(.+)', texto_completo)
         if match_nombre: datos['nombre'] = limpiar_texto(match_nombre.group(1).split("\n")[0])
 
-        # Extracción de Multas
+        # --- EXTRACCIÓN DE MULTAS ---
         bloques = texto_completo.split("ID MULTA")
         for bloque in bloques:
             if "TRIBUNAL" in bloque:
@@ -139,14 +159,16 @@ def generar_zip(datos, multas):
     with zipfile.ZipFile(memoria_zip, 'w') as zf:
         for juzgado, lista_multas in multas_por_juzgado.items():
             doc = Document()
-            # Redacción del Word
+            # Encabezado
             doc.add_heading('SOLICITUD DE PRESCRIPCIÓN', 0).alignment = 1
             doc.add_paragraph(f"JUZGADO: {juzgado}").bold = True
             doc.add_paragraph(f"PATENTE: {datos['patente']}")
+            
             p = doc.add_paragraph()
             p.add_run("EN LO PRINCIPAL: SOLICITA PRESCRIPCIÓN.\nS.J.L.\n\n").bold = True
             p.add_run(f"Yo, {datos['nombre']}, R.U.N {datos['rut']}, propietario del vehículo patente {datos['patente']}, solicito declarar la prescripción (Art. 24 Ley 18.287) de las siguientes anotaciones por tener más de 3 años de antigüedad:")
             
+            # Tabla de Multas
             table = doc.add_table(rows=1, cols=2)
             table.style = 'Table Grid'
             hdr = table.rows[0].cells; hdr[0].text = 'ROL CAUSA'; hdr[1].text = 'FECHA INGRESO RMNP'
@@ -156,13 +178,16 @@ def generar_zip(datos, multas):
             
             doc.add_paragraph("\nPOR TANTO, Ruego a US. acceder a lo solicitado.\n\n___________________________\nFIRMA PROPIETARIO")
             doc.add_paragraph(f"{datos['nombre']}\nR.U.N: {datos['rut']}")
+            
+            # Guardar Word
             doc_io = BytesIO(); doc.save(doc_io); doc_io.seek(0)
             zf.writestr(f"Escrito_{juzgado[:10]}_{datos['patente']}.docx", doc_io.getvalue())
+        
         zf.writestr("INSTRUCCIONES.txt", "1. Imprime 3 copias.\n2. Firma.\n3. Lleva al Juzgado.")
     memoria_zip.seek(0)
     return memoria_zip
 
-# --- FRONTEND ---
+# --- FRONTEND (LA CARA DEL NEGOCIO) ---
 
 st.markdown("""
 <div class="hero">
@@ -171,7 +196,6 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# COLUMNAS DE ACCIÓN
 col_left, col_right = st.columns([1, 1])
 
 with col_left:
@@ -202,18 +226,17 @@ with col_right:
     </div>
     """, unsafe_allow_html=True)
 
-# ZONA UPLOAD
 uploaded_file = st.file_uploader("", type="pdf")
 
 if uploaded_file:
-    with st.spinner('Analizando prescripciones...'):
+    with st.spinner('Analizando historial judicial...'):
         datos, multas = procesar_pdf(uploaded_file)
     
     if datos is None:
-        st.error("⚠️ El archivo subido no es válido. Asegúrate de que sea el Certificado de Multas original.")
+        st.error("⚠️ El archivo no es válido. Asegúrate de subir el Certificado de Multas original del Registro Civil.")
     
     elif multas:
-        # ÉXITO
+        # --- ÉXITO ---
         ahorro = len(multas) * 65000
         st.markdown(f"""
         <div class="success-box">
@@ -226,7 +249,6 @@ if uploaded_file:
         
         st.info("✅ Documentos legales generados con éxito.")
 
-        # PAGO Y DESCARGA
         c1, c2 = st.columns([1.2, 1])
         with c1:
             st.write(" ")

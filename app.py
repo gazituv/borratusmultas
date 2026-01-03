@@ -3,11 +3,14 @@ import pdfplumber
 import re
 from datetime import datetime
 from docx import Document
+from docx.shared import Pt
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from io import BytesIO
 import zipfile
 
 # --- CONFIGURACIÓN DE NEGOCIO ---
 PRECIO_SERVICIO = 14990
+# ⚠️ RECUERDA: Pega aquí tu link real de Mercado Pago
 LINK_MERCADO_PAGO = "https://link.mercadopago.cl/TU_LINK_AQUI" 
 CLAVE_ACCESO = "AUTO2026"
 
@@ -51,46 +54,35 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- LÓGICA DE EXTRACCIÓN (SABUESO 2.0) ---
+# --- LÓGICA DE EXTRACCIÓN (SABUESO UNIVERSAL) ---
 
 def limpiar_texto(texto):
     if not texto: return ""
     return texto.replace('"', '').replace(',', '').strip().upper()
 
 def limpiar_juzgado(nombre_juzgado):
-    """Limpia el nombre del juzgado para que el archivo Word tenga un nombre corto."""
     nombre = nombre_juzgado.upper()
     nombre = nombre.replace("JUZGADO DE POLICIA LOCAL", "").replace("JUZGADO POLICIA LOCAL", "")
     nombre = nombre.replace("TRIBUNAL", "").strip()
     return nombre
 
 def buscar_patente_universal(texto):
-    """
-    Busca patentes Nuevas (BBBB-11) y Antiguas (AA-1111) en todo el texto.
-    """
-    # 1. Intentar buscar etiqueta explícita "PLACA PATENTE..."
+    # 1. Etiqueta explícita (PLACA PATENTE...)
     match_etiqueta = re.search(r'(?:PLACA|PATENTE|PPU).*?([A-Z0-9]{2,4}[\s\.-]?\d{2,4})', texto)
     if match_etiqueta:
         raw = match_etiqueta.group(1).replace(".", "").replace(" ", "").replace("-", "")
-        # Validar si cumple largo 6 (Nueva/Antigua)
-        if len(raw) == 6:
-            return raw
+        if len(raw) == 6: return raw
 
-    # 2. Búsqueda libre en la cabecera (primeros 1000 caracteres)
+    # 2. Búsqueda libre en cabecera
     cabecera = texto[:1000]
     
-    # FORMATO NUEVO: 4 Letras + 2 Números (Ej: ABCD12 o ABCD-12)
-    # Excluimos vocales para evitar confundir con palabras, aunque algunas patentes las tienen, 
-    # el rango B-Z ayuda a filtrar basura.
+    # Formato Nuevo (BBBB-11)
     patron_nueva = re.search(r'\b([B-D,F-H,J-L,P,R-T,V-Z]{4})[\s\.-]?(\d{2})\b', cabecera)
-    if patron_nueva: 
-        return f"{patron_nueva.group(1)}{patron_nueva.group(2)}"
+    if patron_nueva: return f"{patron_nueva.group(1)}{patron_nueva.group(2)}"
     
-    # FORMATO ANTIGUO: 2 Letras + 4 Números (Ej: AB1234 o AB-1234)
-    # Esta es la que te faltaba.
+    # Formato Antiguo (AB-1234)
     patron_antigua = re.search(r'\b([A-Z]{2})[\s\.-]?(\d{4})\b', cabecera)
-    if patron_antigua: 
-        return f"{patron_antigua.group(1)}{patron_antigua.group(2)}"
+    if patron_antigua: return f"{patron_antigua.group(1)}{patron_antigua.group(2)}"
         
     return "NO_DETECTADA"
 
@@ -99,7 +91,7 @@ def es_prescribible(fecha_str):
         fecha_clean = fecha_str.split(" ")[0].strip()
         fecha_obj = datetime.strptime(fecha_clean, '%d-%m-%Y')
         hoy = datetime.now()
-        # REGLA DE ORO: 3 Años = 1095 días
+        # 3 años = 1095 días
         return (hoy - fecha_obj).days > 1095
     except:
         return False
@@ -112,12 +104,11 @@ def procesar_pdf(archivo):
             texto_completo = ""
             for page in pdf.pages: texto_completo += page.extract_text() + "\n"
             
-        texto_limpio = texto_completo.replace("\n", " ") # Aplanar para búsquedas regex
+        texto_limpio = texto_completo.replace("\n", " ")
 
         if "REGISTRO DE MULTAS" not in texto_limpio and "TRANSITO NO PAGADAS" not in texto_limpio:
             return None, None
 
-        # --- EXTRACCION DE DATOS ---
         datos['patente'] = buscar_patente_universal(texto_limpio)
         
         match_rut = re.search(r'R\.U\.N\.\s*:\s*([\d\.\-Kk]+)', texto_completo)
@@ -126,8 +117,6 @@ def procesar_pdf(archivo):
         match_nombre = re.search(r'Nombre\s*:\s*(.+?)(?:Fech|R\.U\.N)', texto_completo)
         if match_nombre: datos['nombre'] = limpiar_texto(match_nombre.group(1))
 
-        # --- EXTRACCION DE MULTAS ---
-        # Volvemos a usar texto_completo con saltos de línea para respetar los bloques
         bloques = texto_completo.split("ID MULTA")
         for bloque in bloques:
             if "TRIBUNAL" in bloque:
@@ -145,9 +134,9 @@ def procesar_pdf(archivo):
                         })
         return datos, multas
     except Exception as e:
-        print(e)
         return None, None
 
+# --- GENERADOR DE WORD (FORMATO LEGAL JUDICIAL) ---
 def generar_zip(datos, multas):
     multas_por_juzgado = {}
     for m in multas:
@@ -159,42 +148,97 @@ def generar_zip(datos, multas):
     with zipfile.ZipFile(memoria_zip, 'w') as zf:
         for juzgado, lista_multas in multas_por_juzgado.items():
             doc = Document()
-            # Ajuste de Fuente
+            
+            # CONFIGURACIÓN DE FUENTE ARIAL 12
             style = doc.styles['Normal']
             font = style.font
             font.name = 'Arial'
-            font.size = 12
+            font.size = Pt(12)
+            
+            # --- 1. LA SUMA (Alineada Derecha) ---
+            p_suma = doc.add_paragraph()
+            p_suma.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            run = p_suma.add_run("EN LO PRINCIPAL: Prescripción Art. 24 Ley 18.287.-\n")
+            run.bold = True
+            p_suma.add_run("PRIMER OTROSÍ: Acompaña documentos.\n")
+            p_suma.add_run("SEGUNDO OTROSÍ: Notificación por correo electrónico.")
 
-            doc.add_heading('SOLICITUD DE PRESCRIPCIÓN', 0).alignment = 1
-            doc.add_paragraph(f"JUZGADO: {juzgado}").bold = True
-            doc.add_paragraph(f"PATENTE: {datos['patente']}")
+            doc.add_paragraph() 
+
+            # --- 2. EL ENCABEZADO (S.J.L.) ---
+            p_sjl = doc.add_paragraph()
+            p_sjl.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run_sjl = p_sjl.add_run(f"S.J.L. DE {juzgado}")
+            run_sjl.bold = True
             
-            p = doc.add_paragraph()
-            p.add_run("EN LO PRINCIPAL: SOLICITA PRESCRIPCIÓN.\nS.J.L.\n\n").bold = True
-            p.add_run(f"Yo, {datos['nombre']}, R.U.N {datos['rut']}, propietario del vehículo patente {datos['patente']}, solicito a US. declarar la prescripción (Art. 24 Ley 18.287) de las siguientes anotaciones por haber transcurrido más de 3 años desde su fecha de ingreso:")
+            doc.add_paragraph()
+
+            # --- 3. INDIVIDUALIZACIÓN (Cuerpo) ---
+            p_cuerpo = doc.add_paragraph()
+            p_cuerpo.add_run(f"{datos['nombre']}").bold = True
+            p_cuerpo.add_run(f", cédula nacional de identidad N° {datos['rut']}, domiciliado en ")
+            p_cuerpo.add_run("__________________________________________________________").bold = True 
+            p_cuerpo.add_run(", comuna de _______________, en los autos sobre infracción a la Ley de Tránsito, placa patente única ")
+            p_cuerpo.add_run(f"{datos['patente']}").bold = True
+            p_cuerpo.add_run(", a US. respetuosamente digo:")
             
+            doc.add_paragraph("Que, por este acto, vengo en solicitar se declare la prescripción de las multas que se detallan a continuación, en razón de lo dispuesto en el artículo 24 de la Ley N° 18.287, por haber transcurrido más de tres años desde su anotación en el Registro de Multas de Tránsito no Pagadas:")
+
+            # --- 4. TABLA DE MULTAS ---
             table = doc.add_table(rows=1, cols=2)
             table.style = 'Table Grid'
-            hdr = table.rows[0].cells; hdr[0].text = 'ROL CAUSA'; hdr[1].text = 'FECHA INGRESO'
-            for m in lista_multas:
-                row = table.add_row().cells
-                row[0].text = str(m['rol']); row[1].text = str(m['fecha_ingreso'])
+            hdr_cells = table.rows[0].cells
+            hdr_cells[0].text = 'ROL CAUSA'
+            hdr_cells[1].text = 'FECHA INGRESO RMNP'
             
-            doc.add_paragraph("\nPOR TANTO,\n\nRUEGO A US. acceder a lo solicitado, ordenando la eliminación de dichas anotaciones del Registro de Multas de Tránsito no Pagadas.\n\n___________________________\nFIRMA PROPIETARIO")
+            # Negritas en tabla
+            for cell in hdr_cells:
+                for paragraph in cell.paragraphs:
+                    for run in paragraph.runs:
+                        run.bold = True
+
+            for m in lista_multas:
+                row_cells = table.add_row().cells
+                row_cells[0].text = str(m['rol'])
+                row_cells[1].text = str(m['fecha_ingreso'])
+
+            doc.add_paragraph()
+
+            # --- 5. PETITORIO (POR TANTO) ---
+            p_tanto = doc.add_paragraph()
+            p_tanto.add_run("POR TANTO, ").bold = True
+            p_tanto.add_run("con el mérito de lo expuesto y del tiempo transcurrido,")
+            
+            p_ruego = doc.add_paragraph("RUEGO A US. acceder a lo solicitado, declarando la prescripción de la(s) multa(s) individualizada(s).")
+
+            doc.add_paragraph()
+            
+            # --- 6. OTROSÍES ---
+            
+            p_otrosi1 = doc.add_paragraph()
+            p_otrosi1.add_run("PRIMER OTROSÍ: ").bold = True
+            p_otrosi1.add_run("Sírvase US. tener por acompañado el Certificado de Multas de Tránsito no Pagadas emitido por el Servicio de Registro Civil e Identificación.")
+            
+            p_otrosi2 = doc.add_paragraph()
+            p_otrosi2.add_run("SEGUNDO OTROSÍ: ").bold = True
+            p_otrosi2.add_run("Vengo en solicitar se me notifique la resolución de esta solicitud al correo electrónico: ")
+            p_otrosi2.add_run("____________________________________________________").bold = True
+            
+            doc.add_paragraph("\n\n\n___________________________\nFIRMA PROPIETARIO")
             doc.add_paragraph(f"{datos['nombre']}\nR.U.N: {datos['rut']}")
             
-            # NOMBRE DE ARCHIVO LIMPIO (JPL + JUZGADO + PATENTE)
+            # --- GUARDADO ---
             juzgado_limpio = limpiar_juzgado(juzgado)
             nombre_archivo = f"Escrito JPL {juzgado_limpio}_{datos['patente']}.docx"
             
             doc_io = BytesIO(); doc.save(doc_io); doc_io.seek(0)
             zf.writestr(nombre_archivo, doc_io.getvalue())
         
-        zf.writestr("INSTRUCCIONES.txt", "1. Imprime 3 copias de cada escrito.\n2. Firma donde dice PROPIETARIO.\n3. Lleva los escritos al Juzgado correspondiente.")
+        zf.writestr("INSTRUCCIONES.txt", "1. Imprime 3 copias de cada escrito.\n2. Rellena a mano tu dirección y correo en las líneas punteadas.\n3. Firma.\n4. Adjunta el Certificado de Multas.")
     memoria_zip.seek(0)
     return memoria_zip
 
-# --- FRONTEND ---
+# --- FRONTEND (WEB) ---
 
 st.markdown("""
 <div class="hero">

@@ -15,17 +15,15 @@ LINK_MERCADO_PAGO = "https://mpago.la/24oHCqt"
 CLAVE_ACCESO = "AUTO2026"
 
 # --- CONFIGURACIÓN VISUAL ---
-st.set_page_config(page_title="BorraTusMultas.cl", page_icon="⚖️", layout="centered")
-
-st.markdown("""
+_PAGE_STYLE = """
     <style>
     #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;900&display=swap');
     html, body, [class*="css"]  {font-family: 'Inter', sans-serif; background-color: #f8fafc;}
-    
+
     .hero {text-align: center; padding: 30px 0;}
     .hero h1 {color: #0f172a; font-weight: 900; font-size: 2.5rem; letter-spacing: -1px; margin-bottom: 5px;}
-    
+
     .instruction-box {
         background: white; padding: 25px; border-radius: 12px;
         border: 1px solid #e2e8f0; text-align: center; margin-bottom: 20px;
@@ -52,7 +50,7 @@ st.markdown("""
         letter-spacing: -2px; line-height: 1.1; margin: 15px 0;
     }
     </style>
-    """, unsafe_allow_html=True)
+    """
 
 # --- LÓGICA DE EXTRACCIÓN ---
 
@@ -284,56 +282,62 @@ def generar_zip(datos, multas):
 
 # --- FRONTEND WEB ---
 
-st.markdown("""
-<div class="hero">
-    <h1>⚖️ BorraTusMultas.cl</h1>
-    <p>Detector Automático de Prescripción</p>
-</div>
-""", unsafe_allow_html=True)
+def main():
+    st.set_page_config(page_title="BorraTusMultas.cl", page_icon="⚖️", layout="centered")
+    st.markdown(_PAGE_STYLE, unsafe_allow_html=True)
+    st.markdown("""
+    <div class="hero">
+        <h1>⚖️ BorraTusMultas.cl</h1>
+        <p>Detector Automático de Prescripción</p>
+    </div>
+    """, unsafe_allow_html=True)
 
-col1, col2 = st.columns(2)
-with col1:
-    st.info("PASO 1: Compra tu Certificado ($1.310) en registrocivil.cl")
-    st.markdown(f'<a href="https://www.registrocivil.cl/principal/servicios-en-linea" target="_blank" class="btn-registrocivil">Ir a RegistroCivil.cl</a>', unsafe_allow_html=True)
+    col1, col2 = st.columns(2)
+    with col1:
+        st.info("PASO 1: Compra tu Certificado ($1.310) en registrocivil.cl")
+        st.markdown(f'<a href="https://www.registrocivil.cl/principal/servicios-en-linea" target="_blank" class="btn-registrocivil">Ir a RegistroCivil.cl</a>', unsafe_allow_html=True)
 
-with col2:
-    st.info("PASO 2: Sube el PDF para analizar")
-    uploaded_file = st.file_uploader("Carga el archivo aquí", type="pdf")
+    with col2:
+        st.info("PASO 2: Sube el PDF para analizar")
+        uploaded_file = st.file_uploader("Carga el archivo aquí", type="pdf")
 
-if uploaded_file:
-    with st.spinner('Analizando documento...'):
-        datos, multas = procesar_pdf(uploaded_file)
-    
-    if datos is None:
-        st.error("⚠️ Archivo no válido. Sube el Certificado de Multas original.")
-    
-    elif multas:
-        ahorro = len(multas) * 65000
-        st.markdown(f"""
-        <div class="success-box">
-            <h2>¡{len(multas)} MULTAS BORRABLES DETECTADAS!</h2>
-            <p>Vehículo: <b>{datos['patente']}</b></p>
-            <div class="money-tag">${ahorro:,.0f}</div>
-            <p>AHORRO ESTIMADO</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        c1, c2 = st.columns([1.2, 1])
-        with c1:
-            st.write(" ")
-            st.markdown(f'<a href="{LINK_MERCADO_PAGO}" target="_blank" class="pay-btn">DESCARGAR ESCRITOS<br><span style="font-size:1rem; font-weight:normal">${PRECIO_SERVICIO:,.0f}</span></a>', unsafe_allow_html=True)
-        
-        with c2:
-            st.write(" ")
-            clave = st.text_input("Ingresa tu clave de pago:", placeholder="Ej: AUTO2026")
-            if clave == CLAVE_ACCESO:
-                zip_buffer = generar_zip(datos, multas)
-                st.balloons()
-                st.download_button("📥 DESCARGAR ZIP", zip_buffer, f"Pack_Legal_{datos['patente']}.zip", "application/zip")
-            elif clave:
-                st.error("Clave incorrecta.")
-                
-    else:
-        st.warning(f"Estimado {datos['nombre']}, tus multas son muy recientes (menos de 3 años). No se pueden borrar.")
+    if uploaded_file:
+        with st.spinner('Analizando documento...'):
+            datos, multas = procesar_pdf(uploaded_file)
 
-st.markdown("<div style='text-align:center; margin-top:50px; color:#cbd5e1;'>BorraTusMultas.cl - 2026</div>", unsafe_allow_html=True)
+        if datos is None:
+            st.error("⚠️ Archivo no válido. Sube el Certificado de Multas original.")
+
+        elif multas:
+            ahorro = len(multas) * 65000
+            st.markdown(f"""
+            <div class="success-box">
+                <h2>¡{len(multas)} MULTAS BORRABLES DETECTADAS!</h2>
+                <p>Vehículo: <b>{datos['patente']}</b></p>
+                <div class="money-tag">${ahorro:,.0f}</div>
+                <p>AHORRO ESTIMADO</p>
+            </div>
+            """, unsafe_allow_html=True)
+
+            c1, c2 = st.columns([1.2, 1])
+            with c1:
+                st.write(" ")
+                st.markdown(f'<a href="{LINK_MERCADO_PAGO}" target="_blank" class="pay-btn">DESCARGAR ESCRITOS<br><span style="font-size:1rem; font-weight:normal">${PRECIO_SERVICIO:,.0f}</span></a>', unsafe_allow_html=True)
+
+            with c2:
+                st.write(" ")
+                clave = st.text_input("Ingresa tu clave de pago:", placeholder="Ej: AUTO2026")
+                if clave == CLAVE_ACCESO:
+                    zip_buffer = generar_zip(datos, multas)
+                    st.balloons()
+                    st.download_button("📥 DESCARGAR ZIP", zip_buffer, f"Pack_Legal_{datos['patente']}.zip", "application/zip")
+                elif clave:
+                    st.error("Clave incorrecta.")
+
+        else:
+            st.warning(f"Estimado {datos['nombre']}, tus multas son muy recientes (menos de 3 años). No se pueden borrar.")
+
+    st.markdown("<div style='text-align:center; margin-top:50px; color:#cbd5e1;'>BorraTusMultas.cl - 2026</div>", unsafe_allow_html=True)
+
+if __name__ == "__main__":
+    main()
